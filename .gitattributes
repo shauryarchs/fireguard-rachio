@@ -1,0 +1,24 @@
+# Ensure all text files use LF (Unix) line endings in the repo
+# Git will auto-convert to CRLF on Windows checkout if core.autocrlf=true
+* text=auto eol=lf
+
+# C/C++ source and headers
+*.ino     text eol=lf
+*.cpp     text eol=lf
+*.h       text eol=lf
+
+# Markdown / docs
+*.md      text eol=lf
+
+# Config / ignore files
+*.gitignore   text eol=lf
+*.gitattributes text eol=lf
+
+# Binary files (do not modify line endings)
+*.jpg     binary
+*.png     binary
+*.gif     binary
+*.zip     binary
+*.bin     binary
+*.hex     binary
+*.eep     binary
