@@ -1,0 +1,38 @@
+# Compiled object files
+*.o
+*.obj
+*.elf
+
+# Compiled binary files
+*.bin
+*.hex
+*.eep
+*.out
+
+# Backup / temp files
+*.bak
+*.swp
+*.swo
+*~
+
+# Arduino IDE build directories
+build/
+*.ardublockly
+*.ino.cpp
+
+# Mac / Windows junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VSCode / CLion / JetBrains IDEs
+.vscode/
+.idea/
+
+# Arduino libraries downloaded locally
+libraries/
+
+# Private config (example: don’t push real API keys)
+Config.h
+!Config.example.h
+
