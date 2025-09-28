@@ -1,5 +1,3 @@
-//this is for testing
-
 #include <LiquidCrystal_I2C.h>
 #include "Config.h"
 #include "Sensors.h"
