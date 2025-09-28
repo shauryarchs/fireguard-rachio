@@ -1,94 +1,125 @@
+//this is for testing
+
 #include <LiquidCrystal_I2C.h>
 #include "Config.h"
 #include "Sensors.h"
 #include "Rachio.h"
 
+// 16x2 I2C LCD at 0x27
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-unsigned long previousMs = 0;
+
+// timing
+unsigned long previousMs   = 0;
 unsigned long lastTriggerMs = 0;
+
+// LCD state
 String currentMessage = "";
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
+  // LCD boot banner
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("FireGuard Ready");
-  lcd.setCursor(0, 1); lcd.print("WiFi connecting");
+  lcd.setCursor(0, 0); lcd.print("System starting");
+  lcd.setCursor(0, 1); lcd.print("Connecting WiFi");
 
+  // IO and network
   sensorsInit();
   rachioConnect();
 
-  Serial.print("[ready] Zone ID: ");   Serial.println(RACHIO_ZONE_ID);
-  Serial.print("[ready] Device ID: "); Serial.println(RACHIO_DEVICE_ID);
-  Serial.print("[ready] Duration: ");  Serial.print(DURATION_SECONDS); Serial.println("s");
+  // Summary
+  Serial.print("Zone ID: ");   Serial.println(RACHIO_ZONE_ID);
+  Serial.print("Device ID: "); Serial.println(RACHIO_DEVICE_ID);
+  Serial.print("Run time: ");  Serial.print(DURATION_SECONDS); Serial.println("s");
 
-  Serial.println("[rachio] Connectivity & auth check: GET /1/public/person/info");
+  // Quick API reachability/auth probe
+  Serial.println("Rachio check: GET /1/public/person/info");
   int hc = rachioHealthCheck();
-  if (hc >= 200 && hc < 300) Serial.println("[rachio] ✅ API reachable and token accepted.");
-  else                       Serial.println("[rachio] ⚠️ API check failed; zone start may fail.");
+  if (hc >= 200 && hc < 300) {
+    Serial.println("Rachio check: OK");
+  } else {
+    Serial.print("Rachio check failed, HTTP "); Serial.println(hc);
+  }
 
+  // Ready UI
   lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("System Ready");
-  lcd.setCursor(0, 1); lcd.print("Rachio armed");
-  currentMessage = "All Clear,System Ready!";
+  lcd.setCursor(0, 0); lcd.print("Ready");
+  lcd.setCursor(0, 1); lcd.print("Rachio online");
+  currentMessage = "System Ready!";
 
-  Serial.println("[ready] Type 's' to start zone now, 'x' to stop all watering.");
+  Serial.println("Serial commands: 's' start zone, 'x' stop all.");
 }
 
 void loop() {
+  // Manual commands
   if (Serial.available()) {
     char c = Serial.read();
     if (c == 's' || c == 'S') {
-      Serial.println("[manual] Forcing zone start...");
+      Serial.println("Manual start request");
       bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
-      Serial.println(ok ? "[manual] Zone start sent." : "[manual] Failed to start zone.");
+      Serial.println(ok ? "Manual start: accepted" : "Manual start: failed");
     } else if (c == 'x' || c == 'X') {
-      Serial.println("[manual] Stopping all watering...");
+      Serial.println("Manual stop-all request");
       bool ok = rachioStopAll(RACHIO_DEVICE_ID);
-      Serial.println(ok ? "[manual] Stop sent." : "[manual] Failed to stop.");
+      Serial.println(ok ? "Manual stop-all: accepted" : "Manual stop-all: failed");
     }
   }
 
+  // Periodic work
   unsigned long nowMs = millis();
   if (nowMs - previousMs >= LOOP_INTERVAL_MS) {
     previousMs = nowMs;
+
+    // Read sensors
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
 
-    Serial.print("[sens] flame="); Serial.print(s.flame);
-    Serial.print(" smoke=");      Serial.print(s.smoke);
-    Serial.print(" tempC=");      Serial.print(s.tempC, 1);
-    Serial.print(" fireDetected="); Serial.println(s.fireDetected ? "YES" : "no");
+    // Diagnostics
+    Serial.print("SENS flame="); Serial.print(s.flame);
+    Serial.print(" smoke=");     Serial.print(s.smoke);
+    Serial.print(" tempC=");     Serial.print(s.tempC, 1);
+    Serial.print(" fire=");      Serial.println(s.fireDetected ? "1" : "0");
 
+    // Decision
     String newMessage;
     if (s.fireDetected) {
       newMessage = "Fire Detected,Sprinklers ON!";
+
+      // trigger immediately the first time, then honor cooldown
       bool allowTrigger = (lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
       if (allowTrigger) {
-        Serial.println("[rachio] FIRE DETECTED → starting zone...");
+        Serial.print("Start zone: "); Serial.print(RACHIO_ZONE_ID);
+        Serial.print(" for "); Serial.print(DURATION_SECONDS); Serial.println("s");
         bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
-        Serial.println(ok ? "[rachio] ✅ Zone start accepted." : "[rachio] ❌ Zone start FAILED.");
+        Serial.println(ok ? "Start zone: accepted" : "Start zone: failed");
         lastTriggerMs = nowMs;
       } else {
         unsigned long remain = (TRIGGER_COOLDOWN_MS - (nowMs - lastTriggerMs)) / 1000;
-        Serial.print("[logic] Fire detected but in cooldown. Seconds remaining: ");
+        Serial.print("Cooldown active, seconds remaining: ");
         Serial.println(remain);
       }
+
       buzzerAlert();
     } else {
-      newMessage = "All Clear,System Ready!";
+      newMessage = "System Ready!";
       digitalWrite(PIN_BUZZER, LOW);
     }
 
+    // LCD update on change
     if (newMessage != currentMessage) {
-      lcd.clear(); delay(5);
+      lcd.clear();
+      delay(5);
       lcd.setCursor(0, 0);
-      if (newMessage == "Fire Detected,Sprinklers ON!") {
-        lcd.print("Fire Detected,"); lcd.setCursor(0, 1); lcd.print("Sprinklers ON!");
+      if (newMessage == "Fire Conditions Detected,Sprinklers ON!") {
+        lcd.print("Fire conditions detected");
+        lcd.setCursor(0, 1);
+        lcd.print("Sprinklers ON");
       } else {
-        lcd.print("All Clear,"); lcd.setCursor(0, 1); lcd.print("System Ready!");
+        lcd.print("All Clear");
+        lcd.setCursor(0, 1);
+        lcd.print("System Ready");
       }
       currentMessage = newMessage;
     }
