@@ -7,7 +7,7 @@
  *
  * Blocks until connected or retries indefinitely.
  */
-void rachioConnect();
+void arduinoWiFiConnect();
 
 /**
  * Performs a connectivity + authentication check against

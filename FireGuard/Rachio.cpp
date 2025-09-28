@@ -5,19 +5,12 @@
 namespace {
   constexpr const char* kHost = "api.rach.io";
   constexpr int kPort = 443;
-  constexpr unsigned long kTimeWaitMs = 45000;
+  constexpr unsigned long kTimeWaitMs = 45000; //Timeout Duration to check for time sync for Arduino
   constexpr time_t kMinValidEpoch = 1700000000UL; // ~Nov 2023
 
   WiFiSSLClient client;
 
-  void waitForTimeSync() {
-    const unsigned long start = millis();
-    time_t now = 0;
-    while (now < kMinValidEpoch && (millis() - start) < kTimeWaitMs) {
-      now = WiFi.getTime();
-      delay(500);
-    }
-  }
+  
 
   bool openHttps() {
     client.stop();
@@ -76,13 +69,20 @@ namespace {
   }
 } // namespace
 
-void rachioConnect() {
-  int s = WL_IDLE_STATUS;
+void arduinoWiFiConnect() {
+  int s = WL_IDLE_STATUS; //s represents "status"
   while (s != WL_CONNECTED) {
     s = WiFi.begin(WIFI_SSID, WIFI_PASS);
     delay(800);
   }
-  waitForTimeSync();
+  
+  //sync time to make sure that we are good to connect to Rachio
+  const unsigned long start = millis(); 
+  time_t now = 0;
+  while (now < kMinValidEpoch && (millis() - start) < kTimeWaitMs) {
+    now = WiFi.getTime();
+    delay(500);
+  }
 }
 
 int rachioHealthCheck() {

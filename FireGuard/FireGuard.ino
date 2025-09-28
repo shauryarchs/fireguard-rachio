@@ -26,7 +26,7 @@ void setup() {
 
   // IO and network
   sensorsInit();
-  rachioConnect();
+  arduinoWiFiConnect();
 
   // Summary
   Serial.print("Zone ID: ");   Serial.println(RACHIO_ZONE_ID);
