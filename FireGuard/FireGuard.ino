@@ -134,6 +134,7 @@ void loop()
       Serial.print("  Wind=");
       Serial.print(currentWeather.windSpeed);
       Serial.println("");
+      Serial.println("");
     }
 
     lastWeatherFetchMs = nowMs;
@@ -149,7 +150,7 @@ void loop()
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
 
     // Print diagnostics
-    Serial.print(" Sensor Temp=");
+    Serial.print("Sensor  Temp=");
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
     sensorTempF -= 40; //-40 is bc temp sensor has +-3C or 40F precision
     Serial.print(sensorTempF,1);
@@ -161,8 +162,8 @@ void loop()
     Serial.print("         Smoke=");
     Serial.print(s.smoke);
 
-    Serial.print("  Fire=");
-    Serial.println(s.fireDetected ? "1" : "0");
+    Serial.print("  Fire =");
+    Serial.println(s.fireDetected ? " Fire Detected!" : " No Fire Detected");
 
 
     // ---------------- WEATHER FIRE RISK ----------------
