@@ -69,8 +69,15 @@ bool WeatherClient::parseResponse(String payload)
   data.temperatureC = doc["main"]["temp"];
   data.humidity = doc["main"]["humidity"];
   data.windSpeed = doc["wind"]["speed"];
-  data.valid = true;
 
+  data.condition = String((const char*)doc["weather"][0]["main"]);
+
+  data.raining =
+      data.condition == "Rain" ||
+      data.condition == "Drizzle" ||
+      data.condition == "Thunderstorm";
+
+  data.valid = true;
 
   return true;
 }

@@ -162,6 +162,19 @@ void loop()
     Serial.print(s.smoke);
 
     Serial.println("");
+    Serial.print("Condition=");
+    Serial.print(currentWeather.condition);
+
+    if (currentWeather.raining)
+    {
+      Serial.print("  Rain detected — sprinklers disabled");
+    }
+    else
+    {
+      Serial.print("    No rain—sprinklers enabled");
+    }
+
+    Serial.println("");
     Serial.println(s.fireDetected ? "Fire Detected!" : "No Fire Detected...");
     Serial.println("");
 
@@ -179,7 +192,9 @@ void loop()
 
 
     // ---------------- FINAL FIRE DECISION ----------------
-    bool fireCondition = s.fireDetected || weatherRisk;
+    bool fireCondition =
+        !currentWeather.raining &&
+        (s.fireDetected || weatherRisk);
 
     String newMessage;
 
