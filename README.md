@@ -86,6 +86,19 @@ FireGuard_Modular/
    * Enter your Rachio API token, Zone ID, and Device ID
    * Adjust thresholds (e.g., temperature trigger) as needed
 
+```
+#pragma once
+#define WIFI_SSID        "wifi-name"
+#define WIFI_PASS        "wifi-password"
+#define RACHIO_API_TOKEN "RACHIO_API_TOKEN"
+#define RACHIO_ZONE_ID   "RACHIO_ZONE_ID"
+#define RACHIO_DEVICE_ID "RACHIO_DEVICE_ID"
+#define DURATION_SECONDS   10
+#define TEMP_THRESHOLD_C   65.0
+#define LOOP_INTERVAL_MS   1000
+#define TRIGGER_COOLDOWN_MS 10000UL
+```
+
 4. **Wire the Sensors**
 
    * Flame sensor → D6
