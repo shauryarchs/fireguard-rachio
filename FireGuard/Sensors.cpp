@@ -1,5 +1,6 @@
 #include "Sensors.h"
 
+// -------- TEMPERATURE SENSOR --------
 static float readTemperatureC() {
   int reading = analogRead(PIN_TMP36);
   float voltage = reading * (5.0f / 1023.0f);
@@ -8,20 +9,36 @@ static float readTemperatureC() {
 
 void sensorsInit() {
   pinMode(PIN_FLAME, INPUT);
-  pinMode(PIN_SMOKE, INPUT);
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
 }
 
+// -------- SENSOR READING --------
 SensorState sensorsRead(float tempThresholdC) {
+
   SensorState s;
+
+  // flame sensor (digital)
   s.flame = digitalRead(PIN_FLAME);
-  s.smoke = digitalRead(PIN_SMOKE);
+
+  // smoke sensor (analog)
+  s.smoke = analogRead(PIN_SMOKE);
+
+  // temperature
   s.tempC = readTemperatureC();
-  s.fireDetected = (s.flame == 0) || (s.smoke == 0) || (s.tempC > tempThresholdC);
+
+  // trigger logic
+  bool flameTrigger = (s.flame == 0);
+  bool smokeTrigger = (s.smoke > SMOKE_THRESHOLD);
+  bool tempTrigger  = (s.tempC > tempThresholdC);
+
+  // fire condition
+  s.fireDetected = flameTrigger || smokeTrigger || tempTrigger;
+
   return s;
 }
 
+// -------- BUZZER --------
 void buzzerAlert() {
   digitalWrite(PIN_BUZZER, HIGH);
   delay(150);
