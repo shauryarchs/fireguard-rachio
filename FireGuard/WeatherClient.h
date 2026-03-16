@@ -1,14 +1,20 @@
 #pragma once
 #include <Arduino.h>
 
-struct WeatherData {
+struct WeatherData
+{
   float temperatureC;
   float humidity;
   float windSpeed;
+
+  String condition;
+  bool raining;
+
   bool valid;
 };
 
-class WeatherClient {
+class WeatherClient
+{
 public:
   WeatherClient(const char* apiKey, float lat, float lon);
 
