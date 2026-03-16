@@ -2,123 +2,245 @@
 #include "Config.h"
 #include "Sensors.h"
 #include "Rachio.h"
+#include "WeatherClient.h"
 
-// 16x2 I2C LCD at 0x27
+// ---------------- LCD ----------------
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// timing
-unsigned long previousMs   = 0;
-unsigned long lastTriggerMs = 0;
+// ---------------- WEATHER CLIENT ----------------
+WeatherClient weather(WEATHER_API_KEY, WEATHER_LAT, WEATHER_LON);
 
-// LCD state
+// ---------------- TIMERS ----------------
+unsigned long previousMs = 0;
+unsigned long lastTriggerMs = 0;
+unsigned long lastWeatherFetchMs = 0;
+
+// ---------------- WEATHER DATA ----------------
+WeatherData currentWeather;
+
+// ---------------- LCD STATE ----------------
 String currentMessage = "";
 
-void setup() {
+
+void setup()
+{
   Serial.begin(115200);
   while (!Serial) {}
 
-  // LCD boot banner
+  // LCD startup screen
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("System starting");
-  lcd.setCursor(0, 1); lcd.print("Connecting WiFi");
+  lcd.setCursor(0,0);
+  lcd.print("System starting");
+  lcd.setCursor(0,1);
+  lcd.print("Connecting WiFi");
 
-  // IO and network
+  // Initialize hardware
   sensorsInit();
+
+  // Connect to WiFi
   arduinoWiFiConnect();
 
-  // Summary
-  Serial.print("Zone ID: ");   Serial.println(RACHIO_ZONE_ID);
-  Serial.print("Device ID: "); Serial.println(RACHIO_DEVICE_ID);
-  Serial.print("Run time: ");  Serial.print(DURATION_SECONDS); Serial.println("s");
+  // Display Rachio configuration
+  Serial.print("Zone ID: ");
+  Serial.println(RACHIO_ZONE_ID);
 
-  // Quick API reachability/auth probe
-  Serial.println("Rachio check: GET /1/public/person/info");
+  Serial.print("Device ID: ");
+  Serial.println(RACHIO_DEVICE_ID);
+
+  Serial.print("Run time: ");
+  Serial.print(DURATION_SECONDS);
+  Serial.println(" seconds");
+
+  // Test Rachio API
+  Serial.println("Checking Rachio API...");
   int hc = rachioHealthCheck();
-  if (hc >= 200 && hc < 300) {
-    Serial.println("Rachio check: OK");
-  } else {
-    Serial.print("Rachio check failed, HTTP "); Serial.println(hc);
+
+  if (hc >= 200 && hc < 300)
+  {
+    Serial.println("Rachio connection OK");
+  }
+  else
+  {
+    Serial.print("Rachio check failed HTTP ");
+    Serial.println(hc);
   }
 
-  // Ready UI
-  lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("Ready");
-  lcd.setCursor(0, 1); lcd.print("Rachio online");
-  currentMessage = "System Ready!";
+  // Initial weather fetch
+  weather.fetchWeather();
+  currentWeather = weather.getWeather();
 
-  Serial.println("Serial commands: 's' start zone, 'x' stop all.");
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("System Ready");
+  lcd.setCursor(0,1);
+  lcd.print("Weather online");
+
+  currentMessage = "System Ready";
+
+  Serial.println("Manual commands:");
+  Serial.println("  s = start sprinkler");
+  Serial.println("  x = stop sprinkler");
 }
 
-void loop() {
-  // Manual commands
-  if (Serial.available()) {
+
+void loop()
+{
+  // ---------------- SERIAL COMMANDS ----------------
+  if (Serial.available())
+  {
     char c = Serial.read();
-    if (c == 's' || c == 'S') {
+
+    if (c == 's' || c == 'S')
+    {
       Serial.println("Manual start request");
+
       bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
-      Serial.println(ok ? "Manual start: accepted" : "Manual start: failed");
-    } else if (c == 'x' || c == 'X') {
-      Serial.println("Manual stop-all request");
+
+      Serial.println(ok ? "Start accepted" : "Start failed");
+    }
+
+    else if (c == 'x' || c == 'X')
+    {
+      Serial.println("Manual stop request");
+
       bool ok = rachioStopAll(RACHIO_DEVICE_ID);
-      Serial.println(ok ? "Manual stop-all: accepted" : "Manual stop-all: failed");
+
+      Serial.println(ok ? "Stop accepted" : "Stop failed");
     }
   }
 
-  // Periodic work
+
   unsigned long nowMs = millis();
-  if (nowMs - previousMs >= LOOP_INTERVAL_MS) {
+
+
+  // ---------------- PERIODIC WEATHER UPDATE ----------------
+  if (nowMs - lastWeatherFetchMs > WEATHER_LOOP_INTERVAL_MS)
+  {
+
+    if (weather.fetchWeather())
+    {
+      currentWeather = weather.getWeather();
+
+      Serial.print("Weather Temp=");
+      float tempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
+      Serial.print(tempF);
+      Serial.print("F ");
+
+      Serial.print(" Humidity=");
+      Serial.print(currentWeather.humidity);
+
+      Serial.print("  Wind=");
+      Serial.print(currentWeather.windSpeed);
+      Serial.println("");
+    }
+
+    lastWeatherFetchMs = nowMs;
+  }
+
+
+  // ---------------- SENSOR LOOP ----------------
+  if (nowMs - previousMs >= SENSOR_LOOP_INTERVAL_MS)
+  {
     previousMs = nowMs;
 
     // Read sensors
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
 
-    // Diagnostics
-    Serial.print("SENS flame="); Serial.print(s.flame);
-    Serial.print(" smoke=");     Serial.print(s.smoke);
-    Serial.print(" tempC=");     Serial.print(s.tempC, 1);
-    Serial.print(" fire=");      Serial.println(s.fireDetected ? "1" : "0");
+    // Print diagnostics
+    Serial.print(" Sensor Temp=");
+    float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
+    sensorTempF -= 40; //-40 is bc temp sensor has +-3C or 40F precision
+    Serial.print(sensorTempF,1);
+    Serial.print("F ");
 
-    // Decision
+    Serial.print("  Flame=");
+    Serial.print(s.flame);
+
+    Serial.print("         Smoke=");
+    Serial.print(s.smoke);
+
+    Serial.print("  Fire=");
+    Serial.println(s.fireDetected ? "1" : "0");
+
+
+    // ---------------- WEATHER FIRE RISK ----------------
+    bool weatherRisk = false;
+
+    if (currentWeather.valid)
+    {
+      if (currentWeather.windSpeed > 8.0 && currentWeather.humidity < 25)
+      {
+        weatherRisk = true;
+      }
+    }
+
+
+    // ---------------- FINAL FIRE DECISION ----------------
+    bool fireCondition = s.fireDetected || weatherRisk;
+
     String newMessage;
-    if (s.fireDetected) {
-      newMessage = "Fire Detected,Sprinklers ON!";
 
-      // trigger immediately the first time, then honor cooldown
-      bool allowTrigger = (lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
-      if (allowTrigger) {
-        Serial.print("Start zone: "); Serial.print(RACHIO_ZONE_ID);
-        Serial.print(" for "); Serial.print(DURATION_SECONDS); Serial.println("s");
-        bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
-        Serial.println(ok ? "Start zone: accepted" : "Start zone: failed");
+    if (fireCondition)
+    {
+      newMessage = "Fire Detected";
+
+      bool allowTrigger =
+        (lastTriggerMs == 0) ||
+        (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
+
+      if (allowTrigger)
+      {
+        Serial.print("Activating sprinkler zone ");
+        Serial.print(RACHIO_ZONE_ID);
+
+        Serial.print(" for ");
+        Serial.print(DURATION_SECONDS);
+        Serial.println(" seconds");
+
+        bool ok =
+          rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
+
+        Serial.println(ok ? "Sprinkler started"
+                          : "Sprinkler failed");
+
         lastTriggerMs = nowMs;
-      } else {
-        unsigned long remain = (TRIGGER_COOLDOWN_MS - (nowMs - lastTriggerMs)) / 1000;
-        Serial.print("Cooldown active, seconds remaining: ");
-        Serial.println(remain);
       }
 
       buzzerAlert();
-    } else {
-      newMessage = "System Ready!";
+    }
+
+    else
+    {
+      newMessage = "System Ready";
       digitalWrite(PIN_BUZZER, LOW);
     }
 
-    // LCD update on change
-    if (newMessage != currentMessage) {
+
+    // ---------------- LCD UPDATE ----------------
+    if (newMessage != currentMessage)
+    {
       lcd.clear();
       delay(5);
-      lcd.setCursor(0, 0);
-      if (newMessage == "Fire Conditions Detected,Sprinklers ON!") {
-        lcd.print("Fire conditions detected");
-        lcd.setCursor(0, 1);
+
+      if (fireCondition)
+      {
+        lcd.setCursor(0,0);
+        lcd.print("Fire Detected!");
+
+        lcd.setCursor(0,1);
         lcd.print("Sprinklers ON");
-      } else {
+      }
+      else
+      {
+        lcd.setCursor(0,0);
         lcd.print("All Clear");
-        lcd.setCursor(0, 1);
+
+        lcd.setCursor(0,1);
         lcd.print("System Ready");
       }
+
       currentMessage = newMessage;
     }
   }
