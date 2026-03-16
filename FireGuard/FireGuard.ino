@@ -116,7 +116,7 @@ void loop()
 
 
   // ---------------- PERIODIC WEATHER UPDATE ----------------
-  if (nowMs - lastWeatherFetchMs > WEATHER_LOOP_INTERVAL_MS)
+  if (nowMs - lastWeatherFetchMs >= WEATHER_LOOP_INTERVAL_MS)
   {
 
     if (weather.fetchWeather())
@@ -133,7 +133,6 @@ void loop()
 
       Serial.print("  Wind=");
       Serial.print(currentWeather.windSpeed);
-      Serial.println("");
       Serial.println("");
     }
 
@@ -162,8 +161,9 @@ void loop()
     Serial.print("         Smoke=");
     Serial.print(s.smoke);
 
-    Serial.print("  Fire =");
-    Serial.println(s.fireDetected ? " Fire Detected!" : " No Fire Detected");
+    Serial.println("");
+    Serial.println(s.fireDetected ? "Fire Detected!" : "No Fire Detected...");
+    Serial.println("");
 
 
     // ---------------- WEATHER FIRE RISK ----------------
