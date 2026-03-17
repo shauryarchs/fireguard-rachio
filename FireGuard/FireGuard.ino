@@ -3,6 +3,7 @@
 #include "Sensors.h"
 #include "Rachio.h"
 #include "WeatherClient.h"
+#include <WiFiS3.h>
 
 // ---------------- LCD ----------------
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -21,9 +22,42 @@ WeatherData currentWeather;
 // ---------------- LCD STATE ----------------
 String currentMessage = "";
 
+WiFiServer server(80);
 
-void setup()
-{
+void handleClient() {
+  WiFiClient client = server.available();
+  if (!client) return;
+
+  String request = client.readStringUntil('\r');
+  client.flush();
+
+  if (request.indexOf("/status") != -1) {
+    SensorState s = sensorsRead(TEMP_THRESHOLD_C);
+    float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
+    sensorTempF -= 40;  //-40 is bc temp sensor has +-3C or 40F precision
+
+    String json = "{";
+    json += "\"temperature\":" + String(sensorTempF) + ",";
+    json += "\"smoke\":" + String(s.smoke) + ",";
+    json += "\"flame\":" + String(s.flame) + ",";
+    json += "\"humidity\":" + String(currentWeather.humidity) + ",";
+    json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
+    json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
+    json += "\"condition\":\"" + currentWeather.condition + "\",";
+    json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
+    json += "}";
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.println(json);
+  }
+
+  client.stop();
+}
+
+void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
@@ -31,9 +65,9 @@ void setup()
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  lcd.setCursor(0,0);
+  lcd.setCursor(0, 0);
   lcd.print("System starting");
-  lcd.setCursor(0,1);
+  lcd.setCursor(0, 1);
   lcd.print("Connecting WiFi");
 
   // Initialize hardware
@@ -41,6 +75,12 @@ void setup()
 
   // Connect to WiFi
   arduinoWiFiConnect();
+
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  server.begin();
+  Serial.println("HTTP server started");
 
   // Display Rachio configuration
   Serial.print("Zone ID: ");
@@ -57,12 +97,9 @@ void setup()
   Serial.println("Checking Rachio API...");
   int hc = rachioHealthCheck();
 
-  if (hc >= 200 && hc < 300)
-  {
+  if (hc >= 200 && hc < 300) {
     Serial.println("Rachio connection OK");
-  }
-  else
-  {
+  } else {
     Serial.print("Rachio check failed HTTP ");
     Serial.println(hc);
   }
@@ -72,9 +109,9 @@ void setup()
   currentWeather = weather.getWeather();
 
   lcd.clear();
-  lcd.setCursor(0,0);
+  lcd.setCursor(0, 0);
   lcd.print("System Ready");
-  lcd.setCursor(0,1);
+  lcd.setCursor(0, 1);
   lcd.print("Weather online");
 
   currentMessage = "System Ready";
@@ -85,15 +122,14 @@ void setup()
 }
 
 
-void loop()
-{
+void loop() {
+  handleClient();
+
   // ---------------- SERIAL COMMANDS ----------------
-  if (Serial.available())
-  {
+  if (Serial.available()) {
     char c = Serial.read();
 
-    if (c == 's' || c == 'S')
-    {
+    if (c == 's' || c == 'S') {
       Serial.println("Manual start request");
 
       bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
@@ -101,8 +137,7 @@ void loop()
       Serial.println(ok ? "Start accepted" : "Start failed");
     }
 
-    else if (c == 'x' || c == 'X')
-    {
+    else if (c == 'x' || c == 'X') {
       Serial.println("Manual stop request");
 
       bool ok = rachioStopAll(RACHIO_DEVICE_ID);
@@ -116,11 +151,9 @@ void loop()
 
 
   // ---------------- PERIODIC WEATHER UPDATE ----------------
-  if (nowMs - lastWeatherFetchMs >= WEATHER_LOOP_INTERVAL_MS)
-  {
+  if (nowMs - lastWeatherFetchMs >= WEATHER_LOOP_INTERVAL_MS) {
 
-    if (weather.fetchWeather())
-    {
+    if (weather.fetchWeather()) {
       currentWeather = weather.getWeather();
 
       Serial.print("Weather Temp=");
@@ -141,8 +174,7 @@ void loop()
 
 
   // ---------------- SENSOR LOOP ----------------
-  if (nowMs - previousMs >= SENSOR_LOOP_INTERVAL_MS)
-  {
+  if (nowMs - previousMs >= SENSOR_LOOP_INTERVAL_MS) {
     previousMs = nowMs;
 
     // Read sensors
@@ -151,8 +183,8 @@ void loop()
     // Print diagnostics
     Serial.print("Sensor  Temp=");
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
-    sensorTempF -= 40; //-40 is bc temp sensor has +-3C or 40F precision
-    Serial.print(sensorTempF,1);
+    sensorTempF -= 40;  //-40 is bc temp sensor has +-3C or 40F precision
+    Serial.print(sensorTempF, 1);
     Serial.print("F ");
 
     Serial.print("  Flame=");
@@ -165,12 +197,9 @@ void loop()
     Serial.print("Condition=");
     Serial.print(currentWeather.condition);
 
-    if (currentWeather.raining)
-    {
+    if (currentWeather.raining) {
       Serial.print("  Rain detected — sprinklers disabled");
-    }
-    else
-    {
+    } else {
       Serial.print("    No rain—sprinklers enabled");
     }
 
@@ -182,10 +211,8 @@ void loop()
     // ---------------- WEATHER FIRE RISK ----------------
     bool weatherRisk = false;
 
-    if (currentWeather.valid)
-    {
-      if (currentWeather.windSpeed > 8.0 && currentWeather.humidity < 25)
-      {
+    if (currentWeather.valid) {
+      if (currentWeather.windSpeed > 8.0 && currentWeather.humidity < 25) {
         weatherRisk = true;
       }
     }
@@ -193,21 +220,17 @@ void loop()
 
     // ---------------- FINAL FIRE DECISION ----------------
     bool fireCondition =
-        !currentWeather.raining &&
-        (s.fireDetected || weatherRisk);
+      !currentWeather.raining && (s.fireDetected || weatherRisk);
 
     String newMessage;
 
-    if (fireCondition)
-    {
+    if (fireCondition) {
       newMessage = "Fire Detected";
 
       bool allowTrigger =
-        (lastTriggerMs == 0) ||
-        (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
+        (lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
 
-      if (allowTrigger)
-      {
+      if (allowTrigger) {
         Serial.print("Activating sprinkler zone ");
         Serial.print(RACHIO_ZONE_ID);
 
@@ -227,33 +250,28 @@ void loop()
       buzzerAlert();
     }
 
-    else
-    {
+    else {
       newMessage = "System Ready";
       digitalWrite(PIN_BUZZER, LOW);
     }
 
 
     // ---------------- LCD UPDATE ----------------
-    if (newMessage != currentMessage)
-    {
+    if (newMessage != currentMessage) {
       lcd.clear();
       delay(5);
 
-      if (fireCondition)
-      {
-        lcd.setCursor(0,0);
+      if (fireCondition) {
+        lcd.setCursor(0, 0);
         lcd.print("Fire Detected!");
 
-        lcd.setCursor(0,1);
+        lcd.setCursor(0, 1);
         lcd.print("Sprinklers ON");
-      }
-      else
-      {
-        lcd.setCursor(0,0);
+      } else {
+        lcd.setCursor(0, 0);
         lcd.print("All Clear");
 
-        lcd.setCursor(0,1);
+        lcd.setCursor(0, 1);
         lcd.print("System Ready");
       }
 
