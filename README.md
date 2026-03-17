@@ -94,9 +94,13 @@ FireGuard_Modular/
 #define RACHIO_ZONE_ID   "RACHIO_ZONE_ID"
 #define RACHIO_DEVICE_ID "RACHIO_DEVICE_ID"
 #define DURATION_SECONDS   10
-#define TEMP_THRESHOLD_C   65.0
-#define LOOP_INTERVAL_MS   1000
+#define TEMP_THRESHOLD_C   65
+#define WEATHER_LOOP_INTERVAL_MS   5000
+#define SENSOR_LOOP_INTERVAL_MS   5000
 #define TRIGGER_COOLDOWN_MS 10000UL
+#define WEATHER_API_KEY "your-weather-key"
+#define WEATHER_LAT 34.1064
+#define WEATHER_LON -117.5931
 ```
 
 4. **Wire the Sensors**
@@ -134,5 +138,3 @@ FireGuard_Modular/
 
 * Keep your `RACHIO_API_TOKEN` private — don’t commit it directly to public repos.
 * For open source release, use an `.example` config file instead.
-
-
