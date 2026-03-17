@@ -24,6 +24,38 @@ String currentMessage = "";
 
 WiFiServer server(80);
 
+void sendToCloud(SensorState s) {
+  WiFiClient client;
+
+  if (client.connect("embersensor.com", 80)) {
+    String json = "{";
+    json += "\"temperature\":" + String(s.tempC) + ",";
+    json += "\"smoke\":" + String(s.smoke) + ",";
+    json += "\"flame\":" + String(s.flame) + ",";
+    json += "\"humidity\":" + String(currentWeather.humidity) + ",";
+    json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
+    json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
+    json += "\"condition\":\"" + currentWeather.condition + "\",";
+    json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
+    json += "}";
+
+    client.println("POST /api/update HTTP/1.1");
+    client.println("Host: embersensor.com");
+    client.println("Content-Type: application/json");
+    client.print("Content-Length: ");
+    client.println(json.length());
+    client.println();
+    client.println(json);
+
+    delay(200);
+    client.stop();
+
+    Serial.println("☁️ Data sent to cloud");
+  } else {
+    Serial.println("❌ Cloud connection failed");
+  }
+}
+
 void handleClient() {
   WiFiClient client = server.available();
   if (!client) return;
@@ -179,6 +211,7 @@ void loop() {
 
     // Read sensors
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
+    sendToCloud(s);
 
     // Print diagnostics
     Serial.print("Sensor  Temp=");
