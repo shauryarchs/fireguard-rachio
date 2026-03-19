@@ -34,6 +34,7 @@ void sendToCloud(SensorState s) {
     json += "\"flame\":" + String(s.flame) + ",";
     json += "\"humidity\":" + String(currentWeather.humidity) + ",";
     json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
+    json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
     json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
     json += "\"condition\":\"" + currentWeather.condition + "\",";
     json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
@@ -74,6 +75,7 @@ void handleClient() {
     json += "\"flame\":" + String(s.flame) + ",";
     json += "\"humidity\":" + String(currentWeather.humidity) + ",";
     json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
+    json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
     json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
     json += "\"condition\":\"" + currentWeather.condition + "\",";
     json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
@@ -198,6 +200,9 @@ void loop() {
 
       Serial.print("  Wind=");
       Serial.print(currentWeather.windSpeed);
+
+      Serial.print("  WindDir=");
+      Serial.print(currentWeather.windDirection);
       Serial.println("");
     }
 

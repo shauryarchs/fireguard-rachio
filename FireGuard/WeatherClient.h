@@ -6,6 +6,7 @@ struct WeatherData
   float temperatureC;
   float humidity;
   float windSpeed;
+  float windDirection;   
 
   String condition;
   bool raining;
