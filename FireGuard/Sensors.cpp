@@ -32,9 +32,6 @@ SensorState sensorsRead(float tempThresholdC) {
   bool smokeTrigger = (s.smoke > SMOKE_THRESHOLD);
   bool tempTrigger  = (s.tempC > tempThresholdC);
 
-  // fire condition
-  s.fireDetected = flameTrigger || smokeTrigger || tempTrigger;
-
   return s;
 }
 

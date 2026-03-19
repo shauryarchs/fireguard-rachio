@@ -4,6 +4,7 @@
 #include "Rachio.h"
 #include "WeatherClient.h"
 #include <WiFiS3.h>
+#include <ArduinoJson.h>
 
 // ---------------- LCD ----------------
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -15,6 +16,7 @@ WeatherClient weather(WEATHER_API_KEY, WEATHER_LAT, WEATHER_LON);
 unsigned long previousMs = 0;
 unsigned long lastTriggerMs = 0;
 unsigned long lastWeatherFetchMs = 0;
+int currentRiskIndex = 1;
 
 // ---------------- WEATHER DATA ----------------
 WeatherData currentWeather;
@@ -24,20 +26,78 @@ String currentMessage = "";
 
 WiFiServer server(80);
 
+bool fetchRiskIndexFromCloud() {
+  WiFiClient client;
+
+  // radius is optional; using 25 here
+  if (!client.connect("embersensor.com", 80)) {
+    Serial.println("❌ Status connection failed");
+    return false;
+  }
+
+  client.println("GET /api/status HTTP/1.1");
+  client.println("Host: embersensor.com");
+  client.println("Connection: close");
+  client.println();
+
+  String payload = "";
+  bool jsonStart = false;
+
+  while (client.connected() || client.available()) {
+    String line = client.readStringUntil('\n');
+
+    if (line == "\r") {
+      jsonStart = true;
+      continue;
+    }
+
+    if (jsonStart) {
+      payload += line;
+    }
+  }
+
+  client.stop();
+
+  if (payload.length() == 0) {
+    Serial.println("❌ Empty /api/status response");
+    return false;
+  }
+
+  StaticJsonDocument<2048> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+
+  if (err) {
+    Serial.println("❌ Failed to parse /api/status JSON");
+    Serial.println(payload);
+    return false;
+  }
+
+  currentRiskIndex = doc["riskIndex"] | 1;
+
+  Serial.println("");
+  Serial.println("☁️ riskIndex from cloud = " + String(currentRiskIndex));
+
+  return true;
+}
+
 void sendToCloud(SensorState s) {
   WiFiClient client;
 
   if (client.connect("embersensor.com", 80)) {
+    float weatherTempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
+    float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
+    sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
+
     String json = "{";
-    json += "\"temperature\":" + String(s.tempC) + ",";
+    json += "\"weatherTemperature\":" + String(weatherTempF) + ",";
+    json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
     json += "\"smoke\":" + String(s.smoke) + ",";
     json += "\"flame\":" + String(s.flame) + ",";
     json += "\"humidity\":" + String(currentWeather.humidity) + ",";
     json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
     json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
     json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
-    json += "\"condition\":\"" + currentWeather.condition + "\",";
-    json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
+    json += "\"condition\":\"" + currentWeather.condition + "\"";
     json += "}";
 
     client.println("POST /api/update HTTP/1.1");
@@ -50,8 +110,7 @@ void sendToCloud(SensorState s) {
 
     delay(200);
     client.stop();
-
-    Serial.println("☁️ Data sent to cloud");
+    Serial.println("☁️ Data sent to cloud: " + json);
   } else {
     Serial.println("❌ Cloud connection failed");
   }
@@ -66,19 +125,21 @@ void handleClient() {
 
   if (request.indexOf("/status") != -1) {
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
+
+    float weatherTempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
-    sensorTempF -= 40;  //-40 is bc temp sensor has +-3C or 40F precision
+    sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
 
     String json = "{";
-    json += "\"temperature\":" + String(sensorTempF) + ",";
+    json += "\"weatherTemperature\":" + String(weatherTempF) + ",";
+    json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
     json += "\"smoke\":" + String(s.smoke) + ",";
     json += "\"flame\":" + String(s.flame) + ",";
     json += "\"humidity\":" + String(currentWeather.humidity) + ",";
     json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
     json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
     json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
-    json += "\"condition\":\"" + currentWeather.condition + "\",";
-    json += "\"fireDetected\":" + String(s.fireDetected ? "true" : "false");
+    json += "\"condition\":\"" + currentWeather.condition + "\"";
     json += "}";
 
     client.println("HTTP/1.1 200 OK");
@@ -221,7 +282,7 @@ void loop() {
     // Print diagnostics
     Serial.print("Sensor  Temp=");
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
-    sensorTempF -= 40;  //-40 is bc temp sensor has +-3C or 40F precision
+    sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
     Serial.print(sensorTempF, 1);
     Serial.print("F ");
 
@@ -241,24 +302,17 @@ void loop() {
       Serial.print("    No rain—sprinklers enabled");
     }
 
-    Serial.println("");
-    Serial.println(s.fireDetected ? "Fire Detected!" : "No Fire Detected...");
-    Serial.println("");
-
-
-    // ---------------- WEATHER FIRE RISK ----------------
-    bool weatherRisk = false;
-
-    if (currentWeather.valid) {
-      if (currentWeather.windSpeed > 8.0 && currentWeather.humidity < 25) {
-        weatherRisk = true;
-      }
-    }
-
 
     // ---------------- FINAL FIRE DECISION ----------------
+    // Cloudflare computes the decision engine.
+    // Start sprinkler only if riskIndex > 7.
+    fetchRiskIndexFromCloud();
     bool fireCondition =
-      !currentWeather.raining && (s.fireDetected || weatherRisk);
+      !currentWeather.raining && (currentRiskIndex > 7);
+
+    Serial.println("");
+    Serial.println(fireCondition ? "Fire Risk Detected!" : "No Fire Risk Detected...");
+    Serial.println("");
 
     String newMessage;
 

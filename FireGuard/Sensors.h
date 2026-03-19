@@ -14,7 +14,6 @@ struct SensorState {
   int flame;
   int smoke;
   float tempC;
-  bool fireDetected;
 };
 
 void sensorsInit();
