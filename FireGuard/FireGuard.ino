@@ -180,7 +180,7 @@ void setup() {
   lcd.setCursor(0, 0);
   lcd.print("System Ready");
   lcd.setCursor(0, 1);
-  lcd.print("Fetching online weather data");
+  lcd.print("Sensor&LiveData");
 
   currentMessage = "System Ready";
 
