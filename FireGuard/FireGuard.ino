@@ -2,24 +2,16 @@
 #include "Config.h"
 #include "Sensors.h"
 #include "Rachio.h"
-#include "WeatherClient.h"
 #include <WiFiS3.h>
 #include <ArduinoJson.h>
 
 // ---------------- LCD ----------------
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// ---------------- WEATHER CLIENT ----------------
-WeatherClient weather(WEATHER_API_KEY, WEATHER_LAT, WEATHER_LON);
-
 // ---------------- TIMERS ----------------
 unsigned long previousMs = 0;
 unsigned long lastTriggerMs = 0;
-unsigned long lastWeatherFetchMs = 0;
 int currentRiskIndex = 1;
-
-// ---------------- WEATHER DATA ----------------
-WeatherData currentWeather;
 
 // ---------------- LCD STATE ----------------
 String currentMessage = "";
@@ -84,20 +76,13 @@ void sendToCloud(SensorState s) {
   WiFiClient client;
 
   if (client.connect("embersensor.com", 80)) {
-    float weatherTempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
     sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
 
     String json = "{";
-    json += "\"weatherTemperature\":" + String(weatherTempF) + ",";
     json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
     json += "\"smoke\":" + String(s.smoke) + ",";
-    json += "\"flame\":" + String(s.flame) + ",";
-    json += "\"humidity\":" + String(currentWeather.humidity) + ",";
-    json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
-    json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
-    json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
-    json += "\"condition\":\"" + currentWeather.condition + "\"";
+    json += "\"flame\":" + String(s.flame);
     json += "}";
 
     client.println("POST /api/update HTTP/1.1");
@@ -125,21 +110,13 @@ void handleClient() {
 
   if (request.indexOf("/status") != -1) {
     SensorState s = sensorsRead(TEMP_THRESHOLD_C);
-
-    float weatherTempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
     sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
 
     String json = "{";
-    json += "\"weatherTemperature\":" + String(weatherTempF) + ",";
     json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
     json += "\"smoke\":" + String(s.smoke) + ",";
-    json += "\"flame\":" + String(s.flame) + ",";
-    json += "\"humidity\":" + String(currentWeather.humidity) + ",";
-    json += "\"wind\":" + String(currentWeather.windSpeed) + ",";
-    json += "\"windDirection\":" + String(currentWeather.windDirection) + ",";
-    json += "\"raining\":" + String(currentWeather.raining ? "true" : "false") + ",";
-    json += "\"condition\":\"" + currentWeather.condition + "\"";
+    json += "\"flame\":" + String(s.flame);
     json += "}";
 
     client.println("HTTP/1.1 200 OK");
@@ -199,15 +176,11 @@ void setup() {
     Serial.println(hc);
   }
 
-  // Initial weather fetch
-  weather.fetchWeather();
-  currentWeather = weather.getWeather();
-
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("System Ready");
   lcd.setCursor(0, 1);
-  lcd.print("Weather online");
+  lcd.print("Fetching online weather data");
 
   currentMessage = "System Ready";
 
@@ -241,35 +214,7 @@ void loop() {
     }
   }
 
-
   unsigned long nowMs = millis();
-
-
-  // ---------------- PERIODIC WEATHER UPDATE ----------------
-  if (nowMs - lastWeatherFetchMs >= WEATHER_LOOP_INTERVAL_MS) {
-
-    if (weather.fetchWeather()) {
-      currentWeather = weather.getWeather();
-
-      Serial.print("Weather Temp=");
-      float tempF = currentWeather.temperatureC * 9.0 / 5.0 + 32.0;
-      Serial.print(tempF);
-      Serial.print("F ");
-
-      Serial.print(" Humidity=");
-      Serial.print(currentWeather.humidity);
-
-      Serial.print("  Wind=");
-      Serial.print(currentWeather.windSpeed);
-
-      Serial.print("  WindDir=");
-      Serial.print(currentWeather.windDirection);
-      Serial.println("");
-    }
-
-    lastWeatherFetchMs = nowMs;
-  }
-
 
   // ---------------- SENSOR LOOP ----------------
   if (nowMs - previousMs >= SENSOR_LOOP_INTERVAL_MS) {
@@ -280,35 +225,23 @@ void loop() {
     sendToCloud(s);
 
     // Print diagnostics
-    Serial.print("Sensor  Temp=");
+    Serial.print("Sensor Temp=");
     float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
     sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
     Serial.print(sensorTempF, 1);
     Serial.print("F ");
 
-    Serial.print("  Flame=");
+    Serial.print(" Flame=");
     Serial.print(s.flame);
 
-    Serial.print("         Smoke=");
+    Serial.print(" Smoke=");
     Serial.print(s.smoke);
-
-    Serial.println("");
-    Serial.print("Condition=");
-    Serial.print(currentWeather.condition);
-
-    if (currentWeather.raining) {
-      Serial.print("  Rain detected — sprinklers disabled");
-    } else {
-      Serial.print("    No rain—sprinklers enabled");
-    }
-
 
     // ---------------- FINAL FIRE DECISION ----------------
     // Cloudflare computes the decision engine.
     // Start sprinkler only if riskIndex > 7.
     fetchRiskIndexFromCloud();
-    bool fireCondition =
-      !currentWeather.raining && (currentRiskIndex > 7);
+    bool fireCondition = currentRiskIndex > 7;
 
     Serial.println("");
     Serial.println(fireCondition ? "Fire Risk Detected!" : "No Fire Risk Detected...");
