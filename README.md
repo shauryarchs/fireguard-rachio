@@ -1,140 +1,177 @@
+# FireGuard – Arduino UNO R4 WiFi + Rachio Integration
 
-# 🔥 FireGuard Modular – Arduino UNO R4 WiFi + Rachio Integration
+FireGuard is an Arduino UNO R4 WiFi project that combines fire detection sensors with a smart sprinkler system for early wildfire prevention.
 
-FireGuard is an Arduino UNO R4 WiFi project that combines **fire detection sensors** with a **smart sprinkler system** for early wildfire prevention.
-
-When flame, smoke, or high temperature is detected, FireGuard automatically starts a configured **Rachio sprinkler zone** via the Rachio Cloud API, while providing **local alerts** on an LCD and buzzer.
-
----
-
-## ✨ Features
-
-* **Multi-sensor detection**
-
-  * Flame sensor
-  * Smoke sensor (digital)
-  * TMP36 temperature sensor
-
-* **Automatic sprinkler activation**
-
-  * Starts a Rachio zone immediately when fire is detected
-  * Cooldown prevents repeated triggers within a short interval
-
-* **Local alerts**
-
-  * LCD screen shows status (“All Clear” / “Fire Detected”)
-  * Buzzer alarm on fire detection
-
-* **Manual override** via Serial Monitor
-
-  * `s` → Start sprinkler zone
-  * `x` → Stop all watering
-
-* **Modular structure**
-
-  * `Config.h` → Wi-Fi, Rachio API token, zone/device IDs, thresholds
-  * `Sensors.h` / `Sensors.cpp` → sensor reading + buzzer alert
-  * `Rachio.h` / `Rachio.cpp` → Wi-Fi, TLS, Rachio API calls
-  * `FireGuard.ino` → main application loop & LCD UI
+Sensor data is uploaded to [EmberSensor](https://embersensor.com) every 5 seconds, which computes a cloud-side risk index. When the risk index exceeds the trigger threshold, FireGuard automatically starts a configured Rachio sprinkler zone via the Rachio Cloud API and alerts locally via LCD and buzzer.
 
 ---
 
-## 📂 Project Structure
+## How It Works
 
 ```
-FireGuard_Modular/
-├── FireGuard.ino      # Main application logic
-├── Config.h           # Wi-Fi & Rachio configuration
-├── Sensors.h          # Sensor interface header
-├── Sensors.cpp        # Sensor implementation
-├── Rachio.h           # Rachio API interface header
-├── Rachio.cpp         # Rachio API implementation
+Sensors (flame, smoke, temp)
+    ↓  every 5s
+sendToCloud()  →  POST embersensor.com/api/update
+    ↓  2.5s later (after cloud has time to process)
+fetchRiskIndexFromCloud()  →  GET embersensor.com/api/status
+    ↓
+riskIndex > 7?
+    ↓  yes
+rachioStartZone()  →  PUT api.rach.io/1/public/zone/start
+    + LCD alert + buzzer
+```
+
+The fire/no-fire decision is made by the EmberSensor cloud service, not locally. The Arduino collects and uploads sensor readings and acts on the returned risk index.
+
+---
+
+## Features
+
+- **Multi-sensor detection**
+  - Flame sensor (digital, active-low) with 5-read debounce — rejects sunlight glints and transient spikes
+  - Smoke sensor (analog, A1) with 5-sample ADC averaging — reduces WiFi-induced ADC noise
+  - TMP36 temperature sensor (analog, A0) with 5-sample ADC averaging
+
+- **Cloud-based risk engine**
+  - Sensor data POSTed to EmberSensor every 5 seconds
+  - Risk index fetched 2.5 seconds later, giving the cloud time to process
+  - Sprinkler fires only when `riskIndex > 7`
+
+- **Automatic sprinkler activation**
+  - Triggers Rachio zone via HTTPS when risk threshold is exceeded
+  - 10-second cooldown between triggers
+  - Auto-trigger lockout after 3 consecutive triggers — prevents runaway activation during sustained false conditions
+  - Lockout auto-expires after 1 hour or can be manually cleared via Serial
+
+- **Local alerts**
+  - 16x2 I2C LCD shows `All Clear / System Ready` or `Fire Detected! / Sprinklers ON`
+  - Buzzer pulses on each fire detection event
+
+- **Manual override** via Serial Monitor (115200 baud)
+  - `s` — start sprinkler zone manually
+  - `x` — stop all watering and clear auto-trigger lockout
+
+---
+
+## Project Structure
+
+```
+FireGuard/
+├── FireGuard.ino     # Main loop: sensor polling, fire decision, LCD, serial commands
+├── Config.h          # All tunable constants (WiFi, Rachio credentials, timing, thresholds)
+├── Sensors.h/.cpp    # Sensor reading with debounce and ADC averaging; buzzer control
+├── Rachio.h/.cpp     # WiFi connect, TLS time sync, Rachio API calls
+└── Cloud.h/.cpp      # EmberSensor HTTP client: sendToCloud, fetchRiskIndex, local /status server
 ```
 
 ---
 
-## ⚡ Hardware Requirements
+## Hardware Requirements
 
-* Arduino UNO R4 WiFi
-* Flame sensor (digital output)
-* Smoke sensor (digital output, e.g., MQ-x with comparator board)
-* TMP36 analog temperature sensor
-* I²C LCD display (16x2, address `0x27`)
-* Passive buzzer
-* Rachio sprinkler system (with API key, zone ID, and device ID)
+| Component | Detail |
+|---|---|
+| Arduino UNO R4 WiFi | Primary microcontroller |
+| Flame sensor | Digital output, wired to D6 (active-low) |
+| Smoke sensor | Analog output, wired to A1 (MQ-x or similar) |
+| TMP36 | Analog temperature sensor, wired to A0 |
+| I2C LCD | 16x2 display, address `0x27` (SDA/SCL) |
+| Passive buzzer | Wired to D5 |
+| Rachio sprinkler system | Cloud API access required |
 
 ---
 
-## 🛠 Setup Instructions
+## Setup Instructions
 
-1. **Install Arduino IDE** (latest version)
+### 1. Install Arduino IDE
 
-   * Select board: **Arduino UNO R4 WiFi**
-   * Install the **WiFiS3** library (built-in for UNO R4)
-   * Install the **LiquidCrystal_I2C** library
+- Select board: **Arduino UNO R4 WiFi**
+- Install libraries:
+  - `WiFiS3` (built-in for UNO R4)
+  - `LiquidCrystal_I2C`
+  - `ArduinoJson`
 
-2. **Wi-Fi Module Setup**
+### 2. Add TLS Certificate for Rachio
 
-   * In Arduino IDE, open **Tools → WiFi Firmware Updater**
-   * Update firmware if needed
-   * Add certificate for `api.rach.io` under **Upload Certificates**
+The Rachio API uses HTTPS. The Arduino's SSL stack requires the server certificate to be pre-loaded:
 
-3. **Configure FireGuard**
+- In Arduino IDE: **Tools → WiFi Firmware Updater**
+- Update firmware if needed
+- Under **Upload Certificates**, add `api.rach.io`
 
-   * Open `Config.h`
-   * Enter your Wi-Fi SSID & password
-   * Enter your Rachio API token, Zone ID, and Device ID
-   * Adjust thresholds (e.g., temperature trigger) as needed
+### 3. Configure Config.h
 
-```
+Open `Config.h` and fill in your credentials and settings:
+
+```cpp
 #pragma once
-#define WIFI_SSID        "wifi-name"
-#define WIFI_PASS        "wifi-password"
-#define RACHIO_API_TOKEN "RACHIO_API_TOKEN"
-#define RACHIO_ZONE_ID   "RACHIO_ZONE_ID"
-#define RACHIO_DEVICE_ID "RACHIO_DEVICE_ID"
-#define DURATION_SECONDS   10
-#define TEMP_THRESHOLD_C   65
-#define WEATHER_LOOP_INTERVAL_MS   5000
-#define SENSOR_LOOP_INTERVAL_MS   5000
-#define TRIGGER_COOLDOWN_MS 10000UL
-#define WEATHER_API_KEY "your-weather-key"
-#define WEATHER_LAT 34.1064
-#define WEATHER_LON -117.5931
+#define WIFI_SSID             "your-wifi-name"
+#define WIFI_PASS             "your-wifi-password"
+#define RACHIO_API_TOKEN      "your-rachio-api-token"
+#define RACHIO_ZONE_ID        "your-zone-uuid"
+#define RACHIO_DEVICE_ID      "your-device-uuid"
+
+#define DURATION_SECONDS          10      // how long sprinkler runs per trigger
+#define SENSOR_LOOP_INTERVAL_MS   5000    // how often sensors are read and uploaded
+#define FETCH_OFFSET_MS           2500    // delay between upload and risk index fetch
+#define TRIGGER_COOLDOWN_MS       10000UL // min time between Rachio triggers
+#define MAX_AUTO_TRIGGERS         3       // triggers before lockout
+#define AUTO_TRIGGER_LOCKOUT_MS   3600000UL // lockout duration (1 hour)
+
+#define FLAME_CONFIRM_READS       5       // consecutive LOW reads required to confirm flame
+#define FLAME_CONFIRM_DELAY_MS    10      // ms between flame confirmation reads
+#define ADC_SAMPLE_COUNT          5       // samples averaged per analog read
+#define ADC_SAMPLE_DELAY_MS       2       // ms between ADC samples
 ```
 
-4. **Wire the Sensors**
+### 4. Wire the Hardware
 
-   * Flame sensor → D6
-   * Smoke sensor → D7
-   * Buzzer → D5
-   * TMP36 → A0
-   * LCD → I²C (SDA, SCL)
+| Sensor | Pin |
+|---|---|
+| Flame sensor | D6 |
+| Smoke sensor | A1 |
+| TMP36 | A0 |
+| Buzzer | D5 |
+| LCD SDA/SCL | I2C bus |
 
-5. **Upload and Run**
+### 5. Upload and Run
 
-   * Compile & upload the project
-   * Open Serial Monitor at `115200` baud
-   * Monitor logs for connectivity and sensor status
+- Compile and upload via Arduino IDE
+- Open Serial Monitor at **115200 baud**
 
 ---
 
-## 🖥 Example Serial Output
+## Example Serial Output
 
 ```
-[ready] Zone ID: 32b157d1-1be0-4abb-8092-a4ce2bc046e8
-[ready] Device ID: 47fbcc2c-ab76-49e5-a5f9-f160d0a52175
-[rachio] Connectivity & auth check: GET /1/public/person/info
-[tls] TLS connected.
-[rachio] ✅ API reachable and token accepted.
-[sens] flame=0 smoke=1 tempC=41.9 fireDetected=YES
-[rachio] FIRE DETECTED → starting zone...
-[rachio] ✅ Zone start accepted.
+IP Address: 192.168.1.42
+HTTP server started
+Zone ID: 22b157d1-...
+Device ID: 47fbcc2c-...
+Run time: 10 seconds
+Checking Rachio API...
+Rachio connection OK
+System Ready
+
+Sensor Temp=72.4F  Flame=1 Smoke=312
+☁️ riskIndex from cloud = 2
+No Fire Risk Detected...
+
+Sensor Temp=74.1F  Flame=0 Smoke=587
+☁️ riskIndex from cloud = 9
+Fire Risk Detected!
+
+Activating sprinkler zone 22b157d1-... for 10 seconds
+Sprinkler started
+```
+
+If 3 auto-triggers fire in a session:
+```
+⚠️ Max auto-triggers reached. Locked out for 1hr. Send 'x' to reset.
+⚠️ Auto-trigger locked out. Send 'x' to reset.
 ```
 
 ---
 
-## 🔒 Security Note
+## Security Note
 
-* Keep your `RACHIO_API_TOKEN` private — don’t commit it directly to public repos.
-* For open source release, use an `.example` config file instead.
+`Config.h` contains sensitive credentials (WiFi password, Rachio API token). Do not commit this file to a public repository. For open-source sharing, provide a `Config.example.h` with placeholder values and add `Config.h` to `.gitignore`.
