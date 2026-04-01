@@ -2,132 +2,26 @@
 #include "Config.h"
 #include "Sensors.h"
 #include "Rachio.h"
+#include "Cloud.h"
 #include <WiFiS3.h>
-#include <ArduinoJson.h>
 
 // ---------------- LCD ----------------
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // ---------------- TIMERS ----------------
-unsigned long previousMs = 0;
-unsigned long lastTriggerMs = 0;
-int currentRiskIndex = 1;
+unsigned long previousSendMs  = 0;
+unsigned long previousFetchMs = FETCH_OFFSET_MS;  // offset so fetch trails send by 2.5s
+unsigned long lastTriggerMs   = 0;
+
+// ---------------- AUTO-TRIGGER LOCKOUT ----------------
+int autoTriggerCount      = 0;
+bool inLockout            = false;
+unsigned long lockoutStartMs = 0;
 
 // ---------------- LCD STATE ----------------
 String currentMessage = "";
 
 WiFiServer server(80);
-
-bool fetchRiskIndexFromCloud() {
-  WiFiClient client;
-
-  // radius is optional; using 25 here
-  if (!client.connect("embersensor.com", 80)) {
-    Serial.println("❌ Status connection failed");
-    return false;
-  }
-
-  client.println("GET /api/status HTTP/1.1");
-  client.println("Host: embersensor.com");
-  client.println("Connection: close");
-  client.println();
-
-  String payload = "";
-  bool jsonStart = false;
-
-  while (client.connected() || client.available()) {
-    String line = client.readStringUntil('\n');
-
-    if (line == "\r") {
-      jsonStart = true;
-      continue;
-    }
-
-    if (jsonStart) {
-      payload += line;
-    }
-  }
-
-  client.stop();
-
-  if (payload.length() == 0) {
-    Serial.println("❌ Empty /api/status response");
-    return false;
-  }
-
-  StaticJsonDocument<2048> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-
-  if (err) {
-    Serial.println("❌ Failed to parse /api/status JSON");
-    Serial.println(payload);
-    return false;
-  }
-
-  currentRiskIndex = doc["riskIndex"] | 1;
-
-  Serial.println("");
-  Serial.println("☁️ riskIndex from cloud = " + String(currentRiskIndex));
-
-  return true;
-}
-
-void sendToCloud(SensorState s) {
-  WiFiClient client;
-
-  if (client.connect("embersensor.com", 80)) {
-    float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
-    sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
-
-    String json = "{";
-    json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
-    json += "\"smoke\":" + String(s.smoke) + ",";
-    json += "\"flame\":" + String(s.flame);
-    json += "}";
-
-    client.println("POST /api/update HTTP/1.1");
-    client.println("Host: embersensor.com");
-    client.println("Content-Type: application/json");
-    client.print("Content-Length: ");
-    client.println(json.length());
-    client.println();
-    client.println(json);
-
-    delay(200);
-    client.stop();
-    Serial.println("☁️ Data sent to cloud: " + json);
-  } else {
-    Serial.println("❌ Cloud connection failed");
-  }
-}
-
-void handleClient() {
-  WiFiClient client = server.available();
-  if (!client) return;
-
-  String request = client.readStringUntil('\r');
-  client.flush();
-
-  if (request.indexOf("/status") != -1) {
-    SensorState s = sensorsRead(TEMP_THRESHOLD_C);
-    float sensorTempF = s.tempC * 9.0 / 5.0 + 32.0;
-    sensorTempF -= 80;  //-80 is bc temp sensor has +-6C or 40F precision
-
-    String json = "{";
-    json += "\"sensorTemperature\":" + String(sensorTempF) + ",";
-    json += "\"smoke\":" + String(s.smoke) + ",";
-    json += "\"flame\":" + String(s.flame);
-    json += "}";
-
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-Type: application/json");
-    client.println("Connection: close");
-    client.println();
-    client.println(json);
-  }
-
-  client.stop();
-}
 
 void setup() {
   Serial.begin(115200);
@@ -186,12 +80,12 @@ void setup() {
 
   Serial.println("Manual commands:");
   Serial.println("  s = start sprinkler");
-  Serial.println("  x = stop sprinkler");
+  Serial.println("  x = stop sprinkler / reset lockout");
 }
 
 
 void loop() {
-  handleClient();
+  handleClient(server);
 
   // ---------------- SERIAL COMMANDS ----------------
   if (Serial.available()) {
@@ -211,17 +105,23 @@ void loop() {
       bool ok = rachioStopAll(RACHIO_DEVICE_ID);
 
       Serial.println(ok ? "Stop accepted" : "Stop failed");
+
+      if (inLockout) {
+        inLockout = false;
+        autoTriggerCount = 0;
+        Serial.println("Auto-trigger lockout cleared");
+      }
     }
   }
 
   unsigned long nowMs = millis();
 
-  // ---------------- SENSOR LOOP ----------------
-  if (nowMs - previousMs >= SENSOR_LOOP_INTERVAL_MS) {
-    previousMs = nowMs;
+  // ---------------- SENSOR READ + SEND ----------------
+  // Reads sensors and uploads to cloud every SENSOR_LOOP_INTERVAL_MS.
+  if (nowMs - previousSendMs >= SENSOR_LOOP_INTERVAL_MS) {
+    previousSendMs = nowMs;
 
-    // Read sensors
-    SensorState s = sensorsRead(TEMP_THRESHOLD_C);
+    SensorState s = sensorsRead();
     sendToCloud(s);
 
     // Print diagnostics
@@ -236,12 +136,16 @@ void loop() {
 
     Serial.print(" Smoke=");
     Serial.print(s.smoke);
+  }
 
-    // ---------------- FINAL FIRE DECISION ----------------
-    // Cloudflare computes the decision engine.
-    // Start sprinkler only if riskIndex > 7.
+  // ---------------- FETCH + FIRE DECISION ----------------
+  // Fetches riskIndex from cloud FETCH_OFFSET_MS after each send,
+  // giving the cloud time to process the latest sensor data.
+  if (nowMs - previousFetchMs >= SENSOR_LOOP_INTERVAL_MS) {
+    previousFetchMs = nowMs;
+
     fetchRiskIndexFromCloud();
-    bool fireCondition = currentRiskIndex > 7;
+    bool fireCondition = getCurrentRiskIndex() > 7;
 
     Serial.println("");
     Serial.println(fireCondition ? "Fire Risk Detected!" : "No Fire Risk Detected...");
@@ -252,8 +156,15 @@ void loop() {
     if (fireCondition) {
       newMessage = "Fire Detected";
 
-      bool allowTrigger =
-        (lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
+      // Check if 1-hour lockout has expired
+      if (inLockout && (nowMs - lockoutStartMs >= AUTO_TRIGGER_LOCKOUT_MS)) {
+        inLockout = false;
+        autoTriggerCount = 0;
+        Serial.println("Auto-trigger lockout expired, resetting");
+      }
+
+      bool allowTrigger = !inLockout &&
+        ((lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS));
 
       if (allowTrigger) {
         Serial.print("Activating sprinkler zone ");
@@ -263,13 +174,21 @@ void loop() {
         Serial.print(DURATION_SECONDS);
         Serial.println(" seconds");
 
-        bool ok =
-          rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
+        bool ok = rachioStartZone(RACHIO_ZONE_ID, DURATION_SECONDS);
 
-        Serial.println(ok ? "Sprinkler started"
-                          : "Sprinkler failed");
+        Serial.println(ok ? "Sprinkler started" : "Sprinkler failed");
 
         lastTriggerMs = nowMs;
+        autoTriggerCount++;
+
+        if (autoTriggerCount >= MAX_AUTO_TRIGGERS) {
+          inLockout = true;
+          lockoutStartMs = nowMs;
+          Serial.println("⚠️ Max auto-triggers reached. Locked out for 1hr. Send 'x' to reset.");
+        }
+
+      } else if (inLockout) {
+        Serial.println("⚠️ Auto-trigger locked out. Send 'x' to reset.");
       }
 
       buzzerAlert();
@@ -279,7 +198,6 @@ void loop() {
       newMessage = "System Ready";
       digitalWrite(PIN_BUZZER, LOW);
     }
-
 
     // ---------------- LCD UPDATE ----------------
     if (newMessage != currentMessage) {

@@ -17,5 +17,5 @@ struct SensorState {
 };
 
 void sensorsInit();
-SensorState sensorsRead(float tempThresholdC);
+SensorState sensorsRead();
 void buzzerAlert();
