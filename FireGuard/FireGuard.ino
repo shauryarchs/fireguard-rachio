@@ -13,11 +13,6 @@ unsigned long previousSendMs  = 0;
 unsigned long previousFetchMs = FETCH_OFFSET_MS;  // offset so fetch trails send by 2.5s
 unsigned long lastTriggerMs   = 0;
 
-// ---------------- AUTO-TRIGGER LOCKOUT ----------------
-int autoTriggerCount      = 0;
-bool inLockout            = false;
-unsigned long lockoutStartMs = 0;
-
 // ---------------- LCD STATE ----------------
 String currentMessage = "";
 
@@ -80,7 +75,7 @@ void setup() {
 
   Serial.println("Manual commands:");
   Serial.println("  s = start sprinkler");
-  Serial.println("  x = stop sprinkler / reset lockout");
+  Serial.println("  x = stop sprinkler");
 }
 
 
@@ -105,12 +100,6 @@ void loop() {
       bool ok = rachioStopAll(RACHIO_DEVICE_ID);
 
       Serial.println(ok ? "Stop accepted" : "Stop failed");
-
-      if (inLockout) {
-        inLockout = false;
-        autoTriggerCount = 0;
-        Serial.println("Auto-trigger lockout cleared");
-      }
     }
   }
 
@@ -156,15 +145,8 @@ void loop() {
     if (fireCondition) {
       newMessage = "Fire Detected";
 
-      // Check if 1-hour lockout has expired
-      if (inLockout && (nowMs - lockoutStartMs >= AUTO_TRIGGER_LOCKOUT_MS)) {
-        inLockout = false;
-        autoTriggerCount = 0;
-        Serial.println("Auto-trigger lockout expired, resetting");
-      }
-
-      bool allowTrigger = !inLockout &&
-        ((lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS));
+      bool allowTrigger =
+        (lastTriggerMs == 0) || (nowMs - lastTriggerMs > TRIGGER_COOLDOWN_MS);
 
       if (allowTrigger) {
         Serial.print("Activating sprinkler zone ");
@@ -179,16 +161,6 @@ void loop() {
         Serial.println(ok ? "Sprinkler started" : "Sprinkler failed");
 
         lastTriggerMs = nowMs;
-        autoTriggerCount++;
-
-        if (autoTriggerCount >= MAX_AUTO_TRIGGERS) {
-          inLockout = true;
-          lockoutStartMs = nowMs;
-          Serial.println("⚠️ Max auto-triggers reached. Locked out for 1hr. Send 'x' to reset.");
-        }
-
-      } else if (inLockout) {
-        Serial.println("⚠️ Auto-trigger locked out. Send 'x' to reset.");
       }
 
       buzzerAlert();

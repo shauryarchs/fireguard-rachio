@@ -40,8 +40,6 @@ The fire/no-fire decision is made by the EmberSensor cloud service, not locally.
 - **Automatic sprinkler activation**
   - Triggers Rachio zone via HTTPS when risk threshold is exceeded
   - 10-second cooldown between triggers
-  - Auto-trigger lockout after 3 consecutive triggers — prevents runaway activation during sustained false conditions
-  - Lockout auto-expires after 1 hour or can be manually cleared via Serial
 
 - **Local alerts**
   - 16x2 I2C LCD shows `All Clear / System Ready` or `Fire Detected! / Sprinklers ON`
@@ -49,7 +47,7 @@ The fire/no-fire decision is made by the EmberSensor cloud service, not locally.
 
 - **Manual override** via Serial Monitor (115200 baud)
   - `s` — start sprinkler zone manually
-  - `x` — stop all watering and clear auto-trigger lockout
+  - `x` — stop all watering
 
 ---
 
@@ -114,8 +112,6 @@ Open `Config.h` and fill in your credentials and settings:
 #define SENSOR_LOOP_INTERVAL_MS   5000    // how often sensors are read and uploaded
 #define FETCH_OFFSET_MS           2500    // delay between upload and risk index fetch
 #define TRIGGER_COOLDOWN_MS       10000UL // min time between Rachio triggers
-#define MAX_AUTO_TRIGGERS         3       // triggers before lockout
-#define AUTO_TRIGGER_LOCKOUT_MS   3600000UL // lockout duration (1 hour)
 
 #define FLAME_CONFIRM_READS       5       // consecutive LOW reads required to confirm flame
 #define FLAME_CONFIRM_DELAY_MS    10      // ms between flame confirmation reads
@@ -162,12 +158,6 @@ Fire Risk Detected!
 
 Activating sprinkler zone 22b157d1-... for 10 seconds
 Sprinkler started
-```
-
-If 3 auto-triggers fire in a session:
-```
-⚠️ Max auto-triggers reached. Locked out for 1hr. Send 'x' to reset.
-⚠️ Auto-trigger locked out. Send 'x' to reset.
 ```
 
 ---

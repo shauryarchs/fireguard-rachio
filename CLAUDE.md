@@ -13,7 +13,7 @@ This repository contains Arduino UNO R4 WiFi / embedded C++ code for the FireGua
 - Sensor read + `sendToCloud` runs every `SENSOR_LOOP_INTERVAL_MS` (5000 ms)
 - `fetchRiskIndexFromCloud` runs on the same interval, offset by `FETCH_OFFSET_MS` (2500 ms) so the cloud has time to process the latest upload
 - Fire decision is `getCurrentRiskIndex() > 7` — the decision is made in the cloud, not on-device
-- Sprinkler trigger gated by `TRIGGER_COOLDOWN_MS` (10 s) and auto-trigger lockout after `MAX_AUTO_TRIGGERS` (3), releasable by time (`AUTO_TRIGGER_LOCKOUT_MS`, 1 hr) or serial `x`
+- Sprinkler trigger gated only by `TRIGGER_COOLDOWN_MS` (10 s); serial `x` stops all watering
 
 ## Key invariants (do not break without explicit request)
 - Pins in `Sensors.h` (`PIN_FLAME=6`, `PIN_SMOKE=A1`, `PIN_BUZZER=5`, `PIN_TMP36=A0`) and LCD I2C address `0x27`
